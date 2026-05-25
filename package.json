@@ -26,6 +26,14 @@
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skyscribe-yf/pi-yolo-bypass.git"
+  },
+  "homepage": "https://github.com/skyscribe-yf/pi-yolo-bypass#readme",
+  "bugs": {
+    "url": "https://github.com/skyscribe-yf/pi-yolo-bypass/issues"
+  },
   "engines": {
     "node": ">=20"
   },
