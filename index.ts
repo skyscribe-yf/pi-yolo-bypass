@@ -282,11 +282,20 @@ export default function yoloBypassExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // Show status in footer
+  // On session start: detect orphaned backups from crashed sessions and restore them.
+  // Only runs on non-reload starts — reload keeps bypass active in the same session.
   pi.on("session_start", (_event: unknown, ctx: ExtensionContext) => {
-    if (isBypassActive()) {
-      ctx.ui.setStatus("yolo-bypass", formatStatus());
+    const event = _event as { reason?: string };
+
+    if (event.reason !== "reload" && isBypassActive()) {
+      const result = disableBypass();
+      if (result.ok) {
+        ctx.ui.notify("🔒 YOLO Bypass restored from previous session (auto-recovery).", "info");
+      }
     }
+
+    // Show status in footer
+    ctx.ui.setStatus("yolo-bypass", formatStatus());
   });
 
   // Re-check status on every turn start (in case an external tool toggled it)
@@ -294,40 +303,12 @@ export default function yoloBypassExtension(pi: ExtensionAPI): void {
     ctx.ui.setStatus("yolo-bypass", formatStatus());
   });
 
-  // Warn on shutdown if bypass is active
-  pi.on("session_shutdown", (event, ctx: ExtensionContext) => {
-    if ((event as { reason?: string }).reason === "quit" && isBypassActive()) {
-      // Can't prompt during shutdown, but can write a notice
-      const backupPath = getBackupPath();
-      if (existsSync(backupPath)) {
-        // Write a marker so next session_start can warn
-        try {
-          writeFileSync(join(getAgentDir(), ".yolo-bypass-warning"), "active-at-shutdown", "utf-8");
-        } catch {
-          // best effort
-        }
-      }
-    }
-  });
-
-  // On next startup, warn if bypass was left active
-  pi.on("session_start", (_event: unknown, ctx: ExtensionContext) => {
-    const warningPath = join(getAgentDir(), ".yolo-bypass-warning");
-    if (existsSync(warningPath)) {
-      try {
-        unlinkSync(warningPath);
-      } catch {
-        // ignore
-      }
-      // Check if bypass is still active
-      if (isBypassActive()) {
-        setTimeout(() => {
-          ctx.ui.notify(
-            "⚠️  YOLO Bypass is still active from previous session. Run /yolo-bypass off to restore.",
-            "warning",
-          );
-        }, 500);
-      }
+  // Auto-restore original policy on session shutdown so bypass never leaks into other sessions.
+  // Exception: reload keeps bypass active since it's the same session.
+  pi.on("session_shutdown", (event, _ctx: ExtensionContext) => {
+    const reason = (event as { reason?: string }).reason;
+    if (reason !== "reload" && isBypassActive()) {
+      disableBypass();
     }
   });
 }

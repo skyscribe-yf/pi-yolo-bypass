@@ -8,6 +8,8 @@ When you need to temporarily grant the agent free rein — bypassing *all* `deny
 
 Instead of modifying the permission system's internal state, this extension **atomically replaces** the `pi-permissions.jsonc` policy file with an all-allow version. The original is backed up to `pi-permissions.jsonc.yolo-bak`. pi-permission-system's file-stamp cache detects the change on the next permission check — no `/reload` needed.
 
+**Session-scoped:** Bypass is automatically restored on session shutdown (quit, `/new`, `/resume`, `/fork`), so it never leaks into other pi sessions. If pi crashes while bypass is active, the next `session_start` detects the orphaned backup and auto-recovers.
+
 | Action | What happens |
 |--------|-------------|
 | `/yolo-bypass on` | Backup → write all-allow policy → 🔓 ACTIVE |
