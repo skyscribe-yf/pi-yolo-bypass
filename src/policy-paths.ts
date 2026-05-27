@@ -117,37 +117,12 @@ export function getProcessDir(): string {
 }
 
 /**
- * Detect whether we should copy policy from a parent process's directory.
- *
- * Three sources:
- *   1. PI_YOLO_BYPASS_PROCESS_DIR — our own env var, set by parent yolo-bypass.
- *      Points to a /tmp/pi-yolo-bypass-{parentPid}-{token}/ directory.
- *   2. PI_PERMISSION_SYSTEM_POLICY_AGENT_DIR — may be set by parent or another extension.
- *      If it's a yolo-bypass dir with different PID, treat as parent.
- *   3. Neither set — fresh process, copy from original ~/.pi/agent/.
- *
- * Returns the source directory path, or null for "use original".
+ * Check if a directory path looks like a yolo-bypass per-process dir
+ * (regardless of PID).
  */
-function detectPolicySourceDir(): string | null {
-  // Check our own env var first — most reliable for subagent inheritance
-  const ourEnv = process.env[YOLO_BYPASS_PROCESS_DIR_ENV]?.trim();
-  if (ourEnv && isYoloBypassDirForDifferentPid(ourEnv)) {
-    return ourEnv;
-  }
-
-  // Check pi-permission-system env var — may be set by parent or another extension
-  const policyEnv = process.env[POLICY_AGENT_DIR_ENV]?.trim();
-  if (policyEnv && isYoloBypassDirForDifferentPid(policyEnv)) {
-    return policyEnv;
-  }
-
-  // If PI_PERMISSION_SYSTEM_POLICY_AGENT_DIR is set to a non-yolo-bypass dir,
-  // respect it as the source but still create our own per-process dir.
-  if (policyEnv && policyEnv !== getOriginalAgentDir()) {
-    return policyEnv;
-  }
-
-  return null;
+function isYoloBypassDir(dirPath: string): boolean {
+  const basename = dirPath.split("/").pop() ?? "";
+  return /^pi-yolo-bypass-\d+-[0-9a-f-]+$/.test(basename);
 }
 
 /**
@@ -161,6 +136,42 @@ export function isYoloBypassDirForDifferentPid(dirPath: string): boolean {
 
   const dirPid = Number(match[1]);
   return dirPid !== processPid;
+}
+
+/**
+ * Determine the policy source directory.
+ *
+ * - Subagents inherit from their parent's yolo-bypass dir via env vars.
+ * - Fresh processes use PI_PERMISSION_SYSTEM_POLICY_AGENT_DIR when it points
+ *   to a non-yolo directory (custom policy from user or another extension).
+ * - Yolo-bypass dirs in env vars are runtime temp directories, not configured
+ *   policies. For non-subagents they are treated as stale and ignored.
+ * - Falls back to the standard original agent dir when no valid source is found.
+ *
+ * Returns the source directory path (never null).
+ */
+function resolvePolicySourceDir(): string {
+  // Subagent inheritance: our own env var is most reliable
+  const ourEnv = process.env[YOLO_BYPASS_PROCESS_DIR_ENV]?.trim();
+  if (isSubagent && ourEnv && isYoloBypassDirForDifferentPid(ourEnv)) {
+    return ourEnv;
+  }
+
+  const policyEnv = process.env[POLICY_AGENT_DIR_ENV]?.trim();
+
+  // Fallback for subagents: PI_PERMISSION_SYSTEM_POLICY_AGENT_DIR may point to parent
+  if (isSubagent && policyEnv && isYoloBypassDirForDifferentPid(policyEnv)) {
+    return policyEnv;
+  }
+
+  // Fresh process: respect custom policy dirs set by users or other extensions.
+  // Yolo-bypass dirs are runtime temp dirs, not configured policies.
+  if (policyEnv && !isYoloBypassDir(policyEnv)) {
+    return policyEnv;
+  }
+
+  // Default: original agent dir
+  return getOriginalAgentDir();
 }
 
 /**
@@ -282,18 +293,7 @@ export function initProcessDir(): string {
   mkdirSync(myProcessDir, { recursive: true });
 
   // 4. Determine policy source
-  const detectedDir = detectPolicySourceDir();
-  // Don't inherit from stale yolo-bypass dirs unless we're a subagent.
-  // A yolo-bypass dir from another PID may have an all-allow policy
-  // or may have been cleaned up after that process exited, causing
-  // pi-permission-system to fall back to "ask" for everything.
-  // Non-yolo-bypass custom policy dirs are still respected.
-  const parentDir = (detectedDir && isYoloBypassDirForDifferentPid(detectedDir) && !isSubagent)
-    ? null
-    : detectedDir;
-  const originalDir = getOriginalAgentDir();
-
-  const policySourceDir = parentDir ?? originalDir;
+  const policySourceDir = resolvePolicySourceDir();
   const sourcePolicyPath = join(policySourceDir, "pi-permissions.jsonc");
 
   // 5. Copy policy file
@@ -313,11 +313,12 @@ export function initProcessDir(): string {
   // the subagent needs the backup to be able to toggle OFF later.
   const sourceBackupPath = join(policySourceDir, "pi-permissions.jsonc.yolo-bak");
   const destBackupPath = join(myProcessDir, "pi-permissions.jsonc.yolo-bak");
-  if (parentDir && existsSync(sourceBackupPath)) {
+  if (existsSync(sourceBackupPath)) {
     copyFileSync(sourceBackupPath, destBackupPath);
   }
 
   // 7. Symlink shared resources to original agent dir
+  const originalDir = getOriginalAgentDir();
   for (const target of SYMLINK_TARGETS) {
     const originalPath = join(originalDir, target);
     const processPath = join(myProcessDir, target);
