@@ -154,7 +154,7 @@ function detectPolicySourceDir(): string | null {
  * Check if a directory path looks like a yolo-bypass per-process dir
  * belonging to a different PID.
  */
-function isYoloBypassDirForDifferentPid(dirPath: string): boolean {
+export function isYoloBypassDirForDifferentPid(dirPath: string): boolean {
   const basename = dirPath.split("/").pop() ?? "";
   const match = basename.match(/^pi-yolo-bypass-(\d+)-([0-9a-f-]+)$/);
   if (!match) return false;
@@ -282,10 +282,15 @@ export function initProcessDir(): string {
   mkdirSync(myProcessDir, { recursive: true });
 
   // 4. Determine policy source
-  // Only subagents inherit from parent process dirs via env vars.
-  // Fresh processes always copy from the original agent dir to avoid
-  // stale env vars from previous sessions pointing to cleaned-up dirs.
-  const parentDir = isSubagent ? detectPolicySourceDir() : null;
+  const detectedDir = detectPolicySourceDir();
+  // Don't inherit from stale yolo-bypass dirs unless we're a subagent.
+  // A yolo-bypass dir from another PID may have an all-allow policy
+  // or may have been cleaned up after that process exited, causing
+  // pi-permission-system to fall back to "ask" for everything.
+  // Non-yolo-bypass custom policy dirs are still respected.
+  const parentDir = (detectedDir && isYoloBypassDirForDifferentPid(detectedDir) && !isSubagent)
+    ? null
+    : detectedDir;
   const originalDir = getOriginalAgentDir();
 
   const policySourceDir = parentDir ?? originalDir;
