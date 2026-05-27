@@ -120,7 +120,7 @@ export function getProcessDir(): string {
  * Check if a directory path looks like a yolo-bypass per-process dir
  * (regardless of PID).
  */
-function isYoloBypassDir(dirPath: string): boolean {
+export function isYoloBypassDir(dirPath: string): boolean {
   const basename = dirPath.split("/").pop() ?? "";
   return /^pi-yolo-bypass-\d+-[0-9a-f-]+$/.test(basename);
 }
@@ -150,7 +150,7 @@ export function isYoloBypassDirForDifferentPid(dirPath: string): boolean {
  *
  * Returns the source directory path (never null).
  */
-function resolvePolicySourceDir(): string {
+export function resolvePolicySourceDir(): string {
   // Subagent inheritance: our own env var is most reliable
   const ourEnv = process.env[YOLO_BYPASS_PROCESS_DIR_ENV]?.trim();
   if (isSubagent && ourEnv && isYoloBypassDirForDifferentPid(ourEnv)) {
