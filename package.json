@@ -1,6 +1,6 @@
 {
   "name": "pi-yolo-bypass",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Dynamic full-permission bypass toggle for pi-permission-system with backup/restore of policy files.",
   "type": "module",
   "main": "./index.ts",

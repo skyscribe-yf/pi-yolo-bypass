@@ -26,6 +26,6 @@ export function markBypassInactive(): void {
 /**
  * Returns a status string for the pi-permission-system status line.
  */
-export function formatStatus(): string {
-  return isBypassActive() ? "🔓 BYPASS" : "";
+export function formatStatus(): string | undefined {
+  return isBypassActive() ? "🔓 BYPASS" : undefined;
 }

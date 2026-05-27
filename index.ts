@@ -186,6 +186,7 @@ async function handleCommand(args: string, ctx: ExtensionCommandContext): Promis
     const result = enableBypass();
     if (result.ok) {
       ctx.ui.notify("🔓 YOLO Bypass ENABLED — all permissions are now allowed.", "info");
+      ctx.ui.setStatus("yolo-bypass", formatStatus());
     } else {
       ctx.ui.notify(`Failed to enable bypass: ${result.error}`, "error");
     }
@@ -200,6 +201,7 @@ async function handleCommand(args: string, ctx: ExtensionCommandContext): Promis
     const result = disableBypass();
     if (result.ok) {
       ctx.ui.notify("🔒 YOLO Bypass DISABLED — original permissions restored.", "info");
+      ctx.ui.setStatus("yolo-bypass", formatStatus());
     } else {
       ctx.ui.notify(`Failed to disable bypass: ${result.error}`, "error");
     }
@@ -210,6 +212,7 @@ async function handleCommand(args: string, ctx: ExtensionCommandContext): Promis
     const result = forceDisableBypass();
     if (result.ok) {
       ctx.ui.notify("🔒 YOLO Bypass force-disabled.", "info");
+      ctx.ui.setStatus("yolo-bypass", formatStatus());
     } else {
       ctx.ui.notify(`Force-disable failed: ${result.error}`, "error");
     }
@@ -236,6 +239,7 @@ async function handleCommand(args: string, ctx: ExtensionCommandContext): Promis
     const result = disableBypass();
     if (result.ok) {
       ctx.ui.notify("🔒 YOLO Bypass DISABLED.", "info");
+      ctx.ui.setStatus("yolo-bypass", formatStatus());
     } else {
       ctx.ui.notify(`Failed to disable: ${result.error}`, "error");
     }
@@ -243,6 +247,7 @@ async function handleCommand(args: string, ctx: ExtensionCommandContext): Promis
     const result = enableBypass();
     if (result.ok) {
       ctx.ui.notify("🔓 YOLO Bypass ENABLED.", "info");
+      ctx.ui.setStatus("yolo-bypass", formatStatus());
     } else {
       ctx.ui.notify(`Failed to enable: ${result.error}`, "error");
     }
@@ -268,6 +273,7 @@ export default function yoloBypassExtension(pi: ExtensionAPI): void {
         const result = disableBypass();
         if (result.ok) {
           ctx.ui.notify("🔒 YOLO Bypass OFF", "info");
+          ctx.ui.setStatus("yolo-bypass", formatStatus());
         } else {
           ctx.ui.notify(`Bypass disable failed: ${result.error}`, "error");
         }
@@ -275,6 +281,7 @@ export default function yoloBypassExtension(pi: ExtensionAPI): void {
         const result = enableBypass();
         if (result.ok) {
           ctx.ui.notify("🔓 YOLO Bypass ON", "info");
+          ctx.ui.setStatus("yolo-bypass", formatStatus());
         } else {
           ctx.ui.notify(`Bypass enable failed: ${result.error}`, "error");
         }
@@ -294,7 +301,7 @@ export default function yoloBypassExtension(pi: ExtensionAPI): void {
       }
     }
 
-    // Show status in footer
+    // Show status in footer (must come after auto-recovery so it reflects the recovered state)
     ctx.ui.setStatus("yolo-bypass", formatStatus());
   });
 
