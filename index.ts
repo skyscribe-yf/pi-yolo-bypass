@@ -231,7 +231,7 @@ async function handleCommand(args: string, ctx: ExtensionCommandContext): Promis
     return;
   }
 
-  if (mode === "status" || mode === "") {
+  if (mode === "status") {
     const active = isBypassActive();
     const backupPath = getBackupPath();
     const backupExists = existsSync(backupPath);
