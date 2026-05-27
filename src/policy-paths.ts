@@ -282,7 +282,10 @@ export function initProcessDir(): string {
   mkdirSync(myProcessDir, { recursive: true });
 
   // 4. Determine policy source
-  const parentDir = detectPolicySourceDir();
+  // Only subagents inherit from parent process dirs via env vars.
+  // Fresh processes always copy from the original agent dir to avoid
+  // stale env vars from previous sessions pointing to cleaned-up dirs.
+  const parentDir = isSubagent ? detectPolicySourceDir() : null;
   const originalDir = getOriginalAgentDir();
 
   const policySourceDir = parentDir ?? originalDir;
