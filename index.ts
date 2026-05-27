@@ -1,8 +1,19 @@
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+  SessionStartEvent,
+  SessionShutdownEvent,
+} from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { getAgentDir } from "./src/policy-paths.js";
+import {
+  cleanupProcessDir,
+  getProcessDir,
+  initProcessDir,
+  isSubagentProcess,
+} from "./src/policy-paths.js";
 import {
   formatStatus,
   isBypassActive,
@@ -41,7 +52,7 @@ const ALL_ALLOW_POLICY = JSON.stringify(
 // ---------------------------------------------------------------------------
 
 function getPolicyPath(): string {
-  return join(getAgentDir(), "pi-permissions.jsonc");
+  return join(getProcessDir(), "pi-permissions.jsonc");
 }
 
 function getBackupPath(): string {
@@ -55,7 +66,7 @@ function atomicWrite(path: string, content: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Bypass management
+// Bypass management (operates on per-process directory)
 // ---------------------------------------------------------------------------
 
 function enableBypass(): { ok: boolean; error?: string } {
@@ -67,11 +78,11 @@ function enableBypass(): { ok: boolean; error?: string } {
   }
 
   if (existsSync(backupPath)) {
-    return { ok: false, error: "Backup already exists. Bypass may already be active (run /yolo-bypass to restore)." };
+    return { ok: false, error: "Backup already exists. Bypass may already be active (run /yolo-bypass off to restore)." };
   }
 
   try {
-    // 1. Back up the original policy
+    // 1. Back up the original policy (in our per-process dir)
     renameSync(policyPath, backupPath);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -103,7 +114,7 @@ function disableBypass(): { ok: boolean; error?: string } {
   if (!existsSync(backupPath)) {
     return {
       ok: false,
-      error: "No backup found. Bypass may not be active, or the backup was lost (run /yolo-bypass to force restore).",
+      error: "No backup found. Bypass may not be active, or the backup was lost (run /yolo-bypass force-off to force restore).",
     };
   }
 
@@ -147,7 +158,7 @@ function forceDisableBypass(): { ok: boolean; error?: string } {
   try {
     const raw = readFileSync(policyPath, "utf-8");
     if (!raw.includes('"tools": "allow"') || !raw.includes('"bash": "allow"')) {
-      // Not our bypass file
+      // Not our bypass file — don't remove it
       return { ok: false, error: "Current policy file does not appear to be a bypass file. Cannot force-restore without a backup." };
     }
   } catch {
@@ -159,12 +170,13 @@ function forceDisableBypass(): { ok: boolean; error?: string } {
     return disableBypass();
   }
 
-  // No backup — just remove the file so pi-permission-system falls back to defaults
+  // No backup — rewrite with a minimal default policy so pi-permission-system
+  // has something to read (falls back to "ask" behavior)
   try {
-    unlinkSync(policyPath);
+    atomicWrite(policyPath, JSON.stringify({ defaultPolicy: { tools: "ask", bash: "ask", mcp: "ask", skills: "ask", special: "ask" } }, null, 2) + "\n");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `Failed to remove bypass policy: ${msg}` };
+    return { ok: false, error: `Failed to write default policy: ${msg}` };
   }
 
   markBypassInactive();
@@ -224,11 +236,14 @@ async function handleCommand(args: string, ctx: ExtensionCommandContext): Promis
     const backupPath = getBackupPath();
     const backupExists = existsSync(backupPath);
     const policyPath = getPolicyPath();
+    const processDir = getProcessDir();
 
     ctx.ui.notify(
       `YOLO Bypass: ${active ? "🔓 ACTIVE" : "🔒 INACTIVE"} | ` +
+      `Process dir: ${processDir} | ` +
       `Policy: ${policyPath} | ` +
-      `Backup: ${backupExists ? "exists" : "none"}`,
+      `Backup: ${backupExists ? "exists" : "none"} | ` +
+      `Subagent: ${isSubagentProcess() ? "yes" : "no"}`,
       "info",
     );
     return;
@@ -259,13 +274,22 @@ async function handleCommand(args: string, ctx: ExtensionCommandContext): Promis
 // ---------------------------------------------------------------------------
 
 export default function yoloBypassExtension(pi: ExtensionAPI): void {
-  // Register command
+  // =========================================================================
+  // STEP 1: Initialize per-process policy directory
+  // This MUST happen before pi-permission-system's session_start handler
+  // calls createPermissionManagerForCwd(), which reads PI_PERMISSION_SYSTEM_POLICY_AGENT_DIR.
+  // Extension factories run in load order before any event handlers fire.
+  // =========================================================================
+  initProcessDir();
+
+  // =========================================================================
+  // STEP 2: Register commands and shortcuts
+  // =========================================================================
   pi.registerCommand("yolo-bypass", {
     description: "Toggle full permission bypass (on/off/toggle/status/force-off)",
     handler: handleCommand,
   });
 
-  // Register shortcut
   pi.registerShortcut("ctrl+shift+y", {
     description: "Toggle YOLO bypass mode",
     handler: async (ctx) => {
@@ -289,19 +313,24 @@ export default function yoloBypassExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // On session start: detect orphaned backups from crashed sessions and restore them.
-  // Only runs on non-reload starts — reload keeps bypass active in the same session.
-  pi.on("session_start", (_event: unknown, ctx: ExtensionContext) => {
-    const event = _event as { reason?: string };
+  // =========================================================================
+  // STEP 3: Lifecycle event handlers
+  // =========================================================================
 
-    if (event.reason !== "reload" && isBypassActive()) {
+  pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
+    // On startup and new/resume/fork: if bypass was left active from a previous
+    // session in the same process, restore policy. (This handles the case where
+    // pi keeps a process alive across sessions — e.g., session switch.)
+    // On reload: keep bypass active since it's the same session continuing.
+    // Subagent sessions: skip auto-recovery — they inherit parent's state independently.
+    if (!isSubagentProcess() && _event.reason !== "reload" && isBypassActive()) {
       const result = disableBypass();
       if (result.ok) {
         ctx.ui.notify("🔒 YOLO Bypass restored from previous session (auto-recovery).", "info");
       }
     }
 
-    // Show status in footer (must come after auto-recovery so it reflects the recovered state)
+    // Show status in footer
     ctx.ui.setStatus("yolo-bypass", formatStatus());
   });
 
@@ -310,12 +339,28 @@ export default function yoloBypassExtension(pi: ExtensionAPI): void {
     ctx.ui.setStatus("yolo-bypass", formatStatus());
   });
 
-  // Auto-restore original policy on session shutdown so bypass never leaks into other sessions.
-  // Exception: reload keeps bypass active since it's the same session.
-  pi.on("session_shutdown", (event, _ctx: ExtensionContext) => {
-    const reason = (event as { reason?: string }).reason;
-    if (reason !== "reload" && isBypassActive()) {
+  pi.on("session_shutdown", (event: SessionShutdownEvent, _ctx: ExtensionContext) => {
+    // Reload: keep bypass active. Non-reload: restore original policy.
+    // Subagent sessions skip this — they clean up on process exit.
+    if (!isSubagentProcess() && event.reason !== "reload" && isBypassActive()) {
       disableBypass();
     }
+  });
+
+  // On process exit: clean up the per-process directory.
+  // This handles the case where the process exits without a session_shutdown event
+  // (e.g., SIGTERM, crash recovery after respawn).
+  // Note: for true crash scenarios (no event fired), stale dirs are cleaned
+  // by the next process with the same PID (cleanupStaleDirs in initProcessDir).
+  process.on("exit", () => {
+    // Restore policy if still active (best-effort)
+    if (isBypassActive()) {
+      try {
+        disableBypass();
+      } catch {
+        // Best-effort — may fail during process exit
+      }
+    }
+    cleanupProcessDir();
   });
 }

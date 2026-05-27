@@ -1,14 +1,25 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { getAgentDir } from "./policy-paths.js";
+import { getProcessDir } from "./policy-paths.js";
 
 /**
- * We track bypass state by checking for the backup file.
- * If the backup exists, the real policy has been replaced by the all-allow file.
+ * Per-process bypass status tracking.
+ *
+ * Bypass state is derived from the filesystem state of the per-process directory:
+ * - If `pi-permissions.jsonc.yolo-bak` exists in our per-process dir → bypass is ON
+ * - If no backup exists → bypass is OFF
+ *
+ * This is naturally isolated: each process has its own directory, so each process
+ * has independent bypass state.
+ */
+
+/**
+ * Check whether yolo bypass is currently active for this process.
+ * Active = backup file exists in our per-process directory.
  */
 export function isBypassActive(): boolean {
-  return existsSync(join(getAgentDir(), "pi-permissions.jsonc.yolo-bak"));
+  return existsSync(join(getProcessDir(), "pi-permissions.jsonc.yolo-bak"));
 }
 
 /**
