@@ -35,8 +35,17 @@ export function markBypassInactive(): void {
 }
 
 /**
+ * Variation Selector-16 (U+FE0F) — forces emoji presentation.
+ * Without this, fontconfig on Linux (especially under CJK locales like zh_CN)
+ * may resolve lock emoji to Noto Sans Symbols 2 (monochrome, nearly invisible)
+ * instead of Noto Color Emoji (clearly visible color glyphs).
+ * VTE/gnome-terminal respects VS16 to prefer the color emoji font.
+ */
+const EMOJI_VS16 = "\uFE0F";
+
+/**
  * Returns a status string for the pi-permission-system status line.
  */
 export function formatStatus(): string {
-  return isBypassActive() ? "🔓 BYPASS" : "🔒";
+  return isBypassActive() ? `🔓${EMOJI_VS16} BYPASS` : `🔒${EMOJI_VS16}`;
 }
